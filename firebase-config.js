@@ -115,7 +115,20 @@ const FireStore = {
         if (!col) return [];
         try {
             const snapshot = await col.orderBy('createdAt', 'desc').get();
-            return snapshot.docs.map(doc => doc.data());
+            return snapshot.docs.map(doc => {
+                const data = doc.data();
+                // If we stored the full tournament as a JSON payload, parse it.
+                if (data && data.payload && typeof data.payload === 'string') {
+                    try {
+                        return JSON.parse(data.payload);
+                    } catch (e) {
+                        // Fallback to raw data when parse fails
+                        return data;
+                    }
+                }
+                // If older format (raw tournament object), return as-is
+                return data;
+            });
         } catch (e) {
             console.error('Firestore read failed:', e);
             return [];
@@ -126,7 +139,18 @@ const FireStore = {
         const col = this.collection();
         if (!col) return;
         try {
-            await col.doc(tournament.id).set(tournament);
+            // Firestore rejects nested arrays in some cases (arrays within arrays).
+            // To avoid this, store a serialized `payload` containing the full tournament
+            // and keep a few indexed metadata fields at top-level for queries.
+            const doc = {
+                id: tournament.id,
+                name: tournament.name || null,
+                type: tournament.type || null,
+                createdAt: tournament.createdAt || Date.now(),
+                owner: Auth.getUid(),
+                payload: JSON.stringify(tournament)
+            };
+            await col.doc(tournament.id).set(doc);
         } catch (e) {
             console.error('Firestore write failed:', e);
         }
@@ -147,7 +171,15 @@ const FireStore = {
         if (!col) return;
         const batch = db.batch();
         tournaments.forEach(t => {
-            batch.set(col.doc(t.id), t);
+            const doc = {
+                id: t.id,
+                name: t.name || null,
+                type: t.type || null,
+                createdAt: t.createdAt || Date.now(),
+                owner: Auth.getUid(),
+                payload: JSON.stringify(t)
+            };
+            batch.set(col.doc(t.id), doc);
         });
         try {
             await batch.commit();
