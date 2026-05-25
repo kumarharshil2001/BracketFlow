@@ -6,7 +6,7 @@
 (function () {
     'use strict';
 
-    // ===== Storage Manager =====
+    // ===== Storage Manager (localStorage + Firestore sync) =====
     const Storage = {
         KEY: 'bracketBuilder_tournaments',
 
@@ -36,6 +36,8 @@
             const all = this.getAll();
             all.unshift(tournament);
             this.save(all);
+            // Sync to cloud
+            if (Auth.isLoggedIn()) FireStore.save(tournament);
         },
 
         updateTournament(tournament) {
@@ -44,12 +46,16 @@
             if (idx !== -1) {
                 all[idx] = tournament;
                 this.save(all);
+                // Sync to cloud
+                if (Auth.isLoggedIn()) FireStore.save(tournament);
             }
         },
 
         deleteTournament(id) {
             const all = this.getAll().filter(t => t.id !== id);
             this.save(all);
+            // Sync to cloud
+            if (Auth.isLoggedIn()) FireStore.delete(id);
         },
 
         exportAll() {
@@ -835,6 +841,64 @@
 
     // ===== Init =====
     renderDashboard();
+
+    // ===== Firebase Auth =====
+    function updateAuthUI(user) {
+        const loggedOut = document.getElementById('authLoggedOut');
+        const loggedIn = document.getElementById('authLoggedIn');
+        if (user) {
+            loggedOut.style.display = 'none';
+            loggedIn.style.display = 'block';
+            document.getElementById('userAvatar').src = user.photoURL || '';
+            document.getElementById('userName').textContent = user.displayName || user.email || 'User';
+        } else {
+            loggedOut.style.display = 'block';
+            loggedIn.style.display = 'none';
+        }
+    }
+
+    async function syncFromCloud() {
+        if (!Auth.isLoggedIn()) return;
+        try {
+            const cloudData = await FireStore.getAll();
+            if (cloudData.length > 0) {
+                // Merge: cloud data takes priority, keep local-only items
+                const localData = Storage.getAll();
+                const cloudIds = new Set(cloudData.map(t => t.id));
+                const localOnly = localData.filter(t => !cloudIds.has(t.id));
+                const merged = [...cloudData, ...localOnly];
+                Storage.save(merged);
+                // Push local-only items to cloud
+                if (localOnly.length > 0) {
+                    FireStore.saveAll(localOnly);
+                }
+            } else {
+                // First sign-in: push all local data to cloud
+                const localData = Storage.getAll();
+                if (localData.length > 0) {
+                    FireStore.saveAll(localData);
+                }
+            }
+            renderDashboard();
+            showToast('Synced with cloud');
+        } catch (e) {
+            console.error('Cloud sync failed:', e);
+        }
+    }
+
+    Auth.init((user) => {
+        updateAuthUI(user);
+        if (user) syncFromCloud();
+    });
+
+    document.getElementById('googleSignInBtn').addEventListener('click', () => {
+        Auth.signInWithGoogle();
+    });
+
+    document.getElementById('signOutBtn').addEventListener('click', () => {
+        Auth.signOut();
+        showToast('Signed out');
+    });
 
     // Redraw connectors on resize
     let resizeTimer;
