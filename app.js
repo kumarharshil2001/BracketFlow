@@ -843,14 +843,19 @@
     renderDashboard();
 
     // ===== Firebase Auth =====
+    let isSignUpMode = false;
+
     function updateAuthUI(user) {
         const loggedOut = document.getElementById('authLoggedOut');
         const loggedIn = document.getElementById('authLoggedIn');
         if (user) {
             loggedOut.style.display = 'none';
             loggedIn.style.display = 'block';
-            document.getElementById('userAvatar').src = user.photoURL || '';
-            document.getElementById('userName').textContent = user.displayName || user.email || 'User';
+            const displayName = user.displayName || user.email || 'User';
+            document.getElementById('userName').textContent = displayName;
+            const initials = displayName.charAt(0).toUpperCase();
+            document.getElementById('userAvatarPlaceholder').textContent = initials;
+            document.getElementById('syncStatus').textContent = 'Syncing...';
         } else {
             loggedOut.style.display = 'block';
             loggedIn.style.display = 'none';
@@ -859,42 +864,133 @@
 
     async function syncFromCloud() {
         if (!Auth.isLoggedIn()) return;
+        const syncStatus = document.getElementById('syncStatus');
         try {
+            syncStatus.textContent = 'Syncing...';
             const cloudData = await FireStore.getAll();
+
             if (cloudData.length > 0) {
-                // Merge: cloud data takes priority, keep local-only items
+                // Cloud is source of truth — merge with any unsaved local data
                 const localData = Storage.getAll();
                 const cloudIds = new Set(cloudData.map(t => t.id));
                 const localOnly = localData.filter(t => !cloudIds.has(t.id));
+
+                // Final local store = cloud data + any local-only items
                 const merged = [...cloudData, ...localOnly];
                 Storage.save(merged);
-                // Push local-only items to cloud
+
+                // Push local-only items to cloud so they persist
                 if (localOnly.length > 0) {
-                    FireStore.saveAll(localOnly);
+                    await FireStore.saveAll(localOnly);
                 }
             } else {
-                // First sign-in: push all local data to cloud
+                // No cloud data yet — push current local data to cloud
                 const localData = Storage.getAll();
                 if (localData.length > 0) {
-                    FireStore.saveAll(localData);
+                    await FireStore.saveAll(localData);
                 }
             }
+
+            syncStatus.textContent = '✓ Synced';
+            setTimeout(() => { syncStatus.textContent = ''; }, 2000);
             renderDashboard();
-            showToast('Synced with cloud');
         } catch (e) {
             console.error('Cloud sync failed:', e);
+            syncStatus.textContent = '✗ Sync failed';
         }
+    }
+
+    function handleLogout() {
+        // Clear local storage on logout so next user gets clean slate
+        Storage.save([]);
+        renderDashboard();
+        switchView('dashboard');
     }
 
     Auth.init((user) => {
         updateAuthUI(user);
-        if (user) syncFromCloud();
+        if (user) {
+            syncFromCloud();
+        } else {
+            // User just logged out
+            handleLogout();
+        }
     });
 
-    document.getElementById('googleSignInBtn').addEventListener('click', () => {
-        Auth.signInWithGoogle();
+    // Email/Password form
+    const authForm = document.getElementById('authForm');
+    const authError = document.getElementById('authError');
+    const authSubmitBtn = document.getElementById('authSubmitBtn');
+    const authToggleBtn = document.getElementById('authToggleBtn');
+    const authForgotBtn = document.getElementById('authForgotBtn');
+
+    const authConfirmPassword = document.getElementById('authConfirmPassword');
+
+    authToggleBtn.addEventListener('click', () => {
+        isSignUpMode = !isSignUpMode;
+        authSubmitBtn.textContent = isSignUpMode ? 'Create Account' : 'Sign In';
+        authToggleBtn.textContent = isSignUpMode ? 'Already have an account?' : 'Create account';
+        authForgotBtn.style.display = isSignUpMode ? 'none' : '';
+        authConfirmPassword.style.display = isSignUpMode ? '' : 'none';
+        authConfirmPassword.required = isSignUpMode;
+        authError.textContent = '';
     });
 
+    authForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('authEmail').value.trim();
+        const password = document.getElementById('authPassword').value;
+        const confirmPassword = authConfirmPassword.value;
+
+        if (!email || !password) return;
+
+        if (isSignUpMode && password !== confirmPassword) {
+            authError.textContent = 'Passwords do not match.';
+            return;
+        }
+
+        authSubmitBtn.disabled = true;
+        authError.textContent = '';
+
+        let result;
+        if (isSignUpMode) {
+            result = await Auth.signUp(email, password);
+        } else {
+            result = await Auth.signIn(email, password);
+        }
+
+        if (!result.success) {
+            authError.textContent = result.message;
+        } else {
+            authForm.reset();
+        }
+        authSubmitBtn.disabled = false;
+    });
+
+    authForgotBtn.addEventListener('click', async () => {
+        const email = document.getElementById('authEmail').value.trim();
+        if (!email) {
+            authError.textContent = 'Enter your email above, then click Forgot password.';
+            return;
+        }
+        const result = await Auth.resetPassword(email);
+        if (result.success) {
+            showToast('Password reset email sent');
+            authError.textContent = '';
+        } else {
+            authError.textContent = result.message;
+        }
+    });
+
+    // Google sign-in
+    document.getElementById('googleSignInBtn').addEventListener('click', async () => {
+        const result = await Auth.signInWithGoogle();
+        if (!result.success) {
+            document.getElementById('authError').textContent = result.message;
+        }
+    });
+
+    // Sign out
     document.getElementById('signOutBtn').addEventListener('click', () => {
         Auth.signOut();
         showToast('Signed out');
