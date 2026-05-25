@@ -108,17 +108,113 @@ body {
     border-bottom: 1px solid var(--border);
 }
 
-.btn-google {
+.auth-form {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.auth-input {
     width: 100%;
-    padding: 10px 14px;
+    padding: 9px 12px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-primary);
+    font-size: 0.8rem;
+    outline: none;
+    transition: var(--transition);
+}
+
+.auth-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.btn-auth {
+    width: 100%;
+    padding: 9px 14px;
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    color: white;
     font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-auth:hover {
+    opacity: 0.9;
+    box-shadow: 0 2px 12px var(--accent-glow);
+}
+
+.btn-auth:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.auth-error {
+    color: var(--danger);
+    font-size: 0.72rem;
+    margin: 0;
+    min-height: 0;
+    transition: var(--transition);
+}
+
+.auth-error:empty {
+    display: none;
+}
+
+.auth-links {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.auth-link {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    cursor: pointer;
+    padding: 0;
+    transition: var(--transition);
+}
+
+.auth-link:hover {
+    color: var(--accent);
+}
+
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+.btn-google {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-primary);
+    font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--transition);
@@ -137,11 +233,17 @@ body {
     margin-bottom: 4px;
 }
 
-.user-avatar {
+.user-avatar-placeholder {
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    object-fit: cover;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 700;
 }
 
 .user-name {
@@ -151,6 +253,14 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.sync-status {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    padding: 0 4px;
+    min-height: 16px;
+    display: block;
 }
 
 .nav-btn {

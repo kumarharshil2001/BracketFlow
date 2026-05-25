@@ -28,12 +28,31 @@ const Auth = {
         });
     },
 
+    async signUp(email, password) {
+        try {
+            await auth.createUserWithEmailAndPassword(email, password);
+            return { success: true };
+        } catch (e) {
+            return { success: false, message: this.getErrorMessage(e.code) };
+        }
+    },
+
+    async signIn(email, password) {
+        try {
+            await auth.signInWithEmailAndPassword(email, password);
+            return { success: true };
+        } catch (e) {
+            return { success: false, message: this.getErrorMessage(e.code) };
+        }
+    },
+
     async signInWithGoogle() {
         const provider = new firebase.auth.GoogleAuthProvider();
         try {
             await auth.signInWithPopup(provider);
+            return { success: true };
         } catch (e) {
-            console.error('Sign-in failed:', e);
+            return { success: false, message: this.getErrorMessage(e.code) };
         }
     },
 
@@ -45,12 +64,41 @@ const Auth = {
         }
     },
 
+    async resetPassword(email) {
+        try {
+            await auth.sendPasswordResetEmail(email);
+            return { success: true };
+        } catch (e) {
+            return { success: false, message: this.getErrorMessage(e.code) };
+        }
+    },
+
     isLoggedIn() {
         return !!this.currentUser;
     },
 
     getUid() {
         return this.currentUser ? this.currentUser.uid : null;
+    },
+
+    getDisplayName() {
+        if (!this.currentUser) return 'User';
+        return this.currentUser.displayName || this.currentUser.email || 'User';
+    },
+
+    getErrorMessage(code) {
+        const messages = {
+            'auth/email-already-in-use': 'This email is already registered.',
+            'auth/invalid-email': 'Invalid email address.',
+            'auth/weak-password': 'Password must be at least 6 characters.',
+            'auth/user-not-found': 'No account found with this email.',
+            'auth/wrong-password': 'Incorrect password.',
+            'auth/too-many-requests': 'Too many attempts. Try again later.',
+            'auth/invalid-credential': 'Invalid email or password.',
+            'auth/popup-closed-by-user': 'Sign-in popup was closed.',
+            'auth/cancelled-popup-request': 'Sign-in cancelled.'
+        };
+        return messages[code] || 'Authentication failed. Please try again.';
     }
 };
 
