@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bracket Builder — Tournament Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <rect x="2" y="4" width="8" height="3" rx="1.5" fill="currentColor"/>
+                        <rect x="2" y="12" width="8" height="3" rx="1.5" fill="currentColor"/>
+                        <rect x="2" y="20" width="8" height="3" rx="1.5" fill="currentColor"/>
+                        <rect x="12" y="8" width="8" height="3" rx="1.5" fill="currentColor" opacity="0.7"/>
+                        <rect x="12" y="16" width="8" height="3" rx="1.5" fill="currentColor" opacity="0.7"/>
+                        <rect x="22" y="12" width="6" height="3" rx="1.5" fill="currentColor" opacity="0.5"/>
+                    </svg>
+                    <span>Bracket Builder</span>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-view="dashboard">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                    Dashboard
+                </button>
+                <button class="nav-btn" data-view="create">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    New Tournament
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <button class="nav-btn" id="importBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Import Brackets
+                </button>
+                <button class="nav-btn" id="exportAllBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Export All
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <section class="view active" id="view-dashboard">
+                <div class="view-header">
+                    <h1>My Tournaments</h1>
+                    <button class="btn btn-primary" id="newTournamentBtn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                        New Tournament
+                    </button>
+                </div>
+                <div class="tournaments-grid" id="tournamentsGrid">
+                    <!-- Tournament cards populated by JS -->
+                </div>
+                <div class="empty-state" id="emptyState">
+                    <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    <h2>No tournaments yet</h2>
+                    <p>Create your first tournament bracket to get started.</p>
+                    <button class="btn btn-primary" id="emptyCreateBtn">Create Tournament</button>
+                </div>
+            </section>
+
+            <!-- Create Tournament View -->
+            <section class="view" id="view-create">
+                <div class="view-header">
+                    <h1>Create Tournament</h1>
+                </div>
+                <div class="create-form-container">
+                    <form id="createForm" class="create-form">
+                        <div class="form-group">
+                            <label for="tournamentName">Tournament Name</label>
+                            <input type="text" id="tournamentName" placeholder="e.g. Spring Championship 2026" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="bracketType">Bracket Type</label>
+                                <select id="bracketType">
+                                    <option value="single">Single Elimination</option>
+                                    <option value="double">Double Elimination</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="thirdPlace">Third Place Match</label>
+                                <select id="thirdPlace">
+                                    <option value="no">No</option>
+                                    <option value="yes">Yes</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Participants</label>
+                            <p class="form-hint">Enter one participant per line (minimum 2). Players are paired in the order entered.</p>
+                            <textarea id="participants" rows="10" placeholder="Team Alpha&#10;Team Beta&#10;Team Gamma&#10;Team Delta"></textarea>
+                            <div class="participant-count">Participants: <span id="participantCount">0</span></div>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="shuffleParticipants"> Randomize seeding
+                            </label>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn btn-secondary" id="cancelCreate">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Generate Bracket</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Bracket View -->
+            <section class="view" id="view-bracket">
+                <div class="view-header bracket-header">
+                    <div class="bracket-title-group">
+                        <button class="btn btn-icon" id="backToDashboard">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        </button>
+                        <div>
+                            <h1 id="bracketTitle" title="Click to rename">Tournament</h1>
+                            <span class="bracket-meta" id="bracketMeta"></span>
+                        </div>
+                    </div>
+                    <div class="bracket-actions">
+                        <button class="btn btn-secondary" id="addMatchBtn">+ Add Match</button>
+                        <button class="btn btn-secondary" id="toggleThirdPlaceBtn" title="Toggle 3rd place match">3rd Place: Off</button>
+                        <button class="btn btn-secondary" id="resetBracketBtn">Reset</button>
+                        <button class="btn btn-secondary" id="exportBracketBtn">Export</button>
+                        <button class="btn btn-danger" id="deleteBracketBtn">Delete</button>
+                    </div>
+                </div>
+                <div class="bracket-tabs" id="bracketTabs">
+                    <button class="tab-btn active" data-tab="winners">Winners Bracket</button>
+                    <button class="tab-btn" data-tab="losers">Losers Bracket</button>
+                    <button class="tab-btn" data-tab="finals">Grand Finals</button>
+                </div>
+                <div class="bracket-container" id="bracketContainer">
+                    <!-- Bracket SVG/HTML rendered here -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Match Modal -->
+    <div class="modal-overlay" id="matchModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Match Result</h2>
+                <button class="btn btn-icon modal-close" id="closeModal">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="match-participants">
+                    <button class="match-pick" id="pickPlayer1">
+                        <span class="pick-name" id="modalPlayer1">Player 1</span>
+                        <span class="pick-label">Click to select winner</span>
+                    </button>
+                    <div class="match-vs">VS</div>
+                    <button class="match-pick" id="pickPlayer2">
+                        <span class="pick-name" id="modalPlayer2">Player 2</span>
+                        <span class="pick-label">Click to select winner</span>
+                    </button>
+                </div>
+                <button class="btn btn-danger delete-match-btn" id="deleteMatchBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    Delete Match
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- File input for import -->
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+
+    <script src="bracket.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
