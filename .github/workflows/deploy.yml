@@ -34,6 +34,7 @@ jobs:
         run: |
           CONFIG_PATH=$(find . -name "firebase-config.js" | head -1)
           echo "Found config at: $CONFIG_PATH"
+          export CONFIG_PATH
           node -e "
             const fs = require('fs');
             const filePath = process.env.CONFIG_PATH;
@@ -47,7 +48,7 @@ jobs:
               .replace('__FIREBASE_APP_ID__', process.env.FIREBASE_APP_ID);
             fs.writeFileSync(filePath, content);
             console.log('Done. Replaced values in: ' + filePath);
-          " --env CONFIG_PATH="$CONFIG_PATH"
+          "
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
