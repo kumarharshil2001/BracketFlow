@@ -34,29 +34,9 @@ jobs:
         run: |
           CONFIG_PATH=$(find . -name "firebase-config.js" -not -path "./.git/*" | head -1)
           echo "Config file: $CONFIG_PATH"
-          echo "FIREBASE_API_KEY set: $([ -n "$FIREBASE_API_KEY" ] && echo YES || echo NO)"
-
-          cat > /tmp/inject.js << 'EOF'
-          const fs = require('fs');
-          const filePath = process.argv[2];
-          const tokens = {
-            '__FIREBASE_API_KEY__': process.env.FIREBASE_API_KEY,
-            '__FIREBASE_AUTH_DOMAIN__': process.env.FIREBASE_AUTH_DOMAIN,
-            '__FIREBASE_PROJECT_ID__': process.env.FIREBASE_PROJECT_ID,
-            '__FIREBASE_STORAGE_BUCKET__': process.env.FIREBASE_STORAGE_BUCKET,
-            '__FIREBASE_MESSAGING_SENDER_ID__': process.env.FIREBASE_MESSAGING_SENDER_ID,
-            '__FIREBASE_APP_ID__': process.env.FIREBASE_APP_ID,
-          };
-          let content = fs.readFileSync(filePath, 'utf8');
-          for (const [token, value] of Object.entries(tokens)) {
-            if (!value) { console.error('WARNING: no value for ' + token); continue; }
-            content = content.replace(token, value);
-          }
-          fs.writeFileSync(filePath, content);
-          console.log('Injection complete:', filePath);
-          EOF
-
-          node /tmp/inject.js "$CONFIG_PATH"
+          envsubst '${FIREBASE_API_KEY},${FIREBASE_AUTH_DOMAIN},${FIREBASE_PROJECT_ID},${FIREBASE_STORAGE_BUCKET},${FIREBASE_MESSAGING_SENDER_ID},${FIREBASE_APP_ID}' < "$CONFIG_PATH" > /tmp/firebase-config-injected.js
+          mv /tmp/firebase-config-injected.js "$CONFIG_PATH"
+          echo "Injection complete"
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
