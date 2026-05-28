@@ -4,22 +4,32 @@ on:
   push:
     branches: [main]
 
+# Required permissions for the official Pages deploy action
 permissions:
-  contents: write
+  contents: read   # to check out the repo
+  pages: write     # to deploy to Pages
+  id-token: write  # to verify the deployment origin
+
+# Only one Pages deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── STEP 1: Fail immediately if any secret is missing or empty ────────
+      # ── GUARD: fail immediately if any secret is missing ──────────────────
       # When a GitHub Secret is not set, Actions passes an empty string.
-      # sed then happily replaces placeholders with "", the verify grep
-      # finds no __FIREBASE_ tokens, reports "OK", and deploys blank values.
-      # This guard catches that before it happens.
+      # sed then replaces placeholders with "", grep reports "OK", and the
+      # site is deployed with blank Firebase values. This step catches that.
       - name: Validate secrets are present
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
@@ -36,21 +46,17 @@ jobs:
           [ -z "$FIREBASE_STORAGE_BUCKET" ]      && missing+=("FIREBASE_STORAGE_BUCKET")
           [ -z "$FIREBASE_MESSAGING_SENDER_ID" ] && missing+=("FIREBASE_MESSAGING_SENDER_ID")
           [ -z "$FIREBASE_APP_ID" ]              && missing+=("FIREBASE_APP_ID")
-
           if [ ${#missing[@]} -gt 0 ]; then
-            echo ""
-            echo "ERROR: The following GitHub Secrets are not set or are empty:"
+            echo "ERROR: The following GitHub Secrets are not set:"
             printf '  - %s\n' "${missing[@]}"
-            echo ""
-            echo "Fix: go to your repo → Settings → Secrets and variables"
-            echo "     → Actions → New repository secret"
-            echo "     Add each missing secret with its real Firebase value."
+            echo "Go to: Settings → Secrets and variables → Actions → New repository secret"
             exit 1
           fi
-
           echo "OK: All required secrets are present."
 
-      # ── STEP 2: Inject real values into firebase-config.js ───────────────
+      # ── INJECT: replace placeholders with real values ─────────────────────
+      # This edits firebase-config.js on the runner only.
+      # Nothing is committed back to main — main always keeps placeholders.
       - name: Inject Firebase config from secrets
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
@@ -67,7 +73,7 @@ jobs:
           sed -i "s|__FIREBASE_MESSAGING_SENDER_ID__|${FIREBASE_MESSAGING_SENDER_ID}|g" firebase-config.js
           sed -i "s|__FIREBASE_APP_ID__|${FIREBASE_APP_ID}|g"                           firebase-config.js
 
-      # ── STEP 3: Confirm no placeholder remains ────────────────────────────
+      # ── VERIFY: no placeholder should remain ─────────────────────────────
       - name: Verify injection
         run: |
           if grep -q "__FIREBASE_" firebase-config.js; then
@@ -77,10 +83,17 @@ jobs:
           fi
           echo "OK: All Firebase values injected successfully."
 
-      # ── STEP 4: Deploy ────────────────────────────────────────────────────
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      # ── DEPLOY: upload to Pages directly from the runner ─────────────────
+      # This bypasses the gh-pages branch entirely. GitHub Pages serves
+      # whatever is uploaded here — the injected files from this runner.
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
-          publish_branch: gh-pages
+          path: .   # upload the whole repo root (with injected firebase-config.js)
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
