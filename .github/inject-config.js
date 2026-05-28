@@ -5,11 +5,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const configPath = process.argv[2];
-if (!configPath) {
+const configPathArg = process.argv[2];
+if (!configPathArg) {
     console.error('Usage: node inject-config.js <path-to-firebase-config.js>');
     process.exit(1);
 }
+
+const configPath = path.isAbsolute(configPathArg)
+    ? configPathArg
+    : path.resolve(process.cwd(), configPathArg);
 
 const required = [
     'FIREBASE_API_KEY',
@@ -41,8 +45,13 @@ const replacements = {
 };
 
 for (const [token, value] of Object.entries(replacements)) {
-    content = content.replace(token, value);
+    content = content.split(token).join(value);
 }
 
-fs.writeFileSync(configPath, content);
+if (content.includes('__FIREBASE_')) {
+    console.error('ERROR: Some Firebase placeholders were not replaced.');
+    process.exit(1);
+}
+
+fs.writeFileSync(configPath, content, 'utf8');
 console.log('Firebase config injected successfully into:', configPath);

@@ -36,6 +36,13 @@ jobs:
           echo "Config file: $CONFIG_PATH"
           node .github/inject-config.js "$CONFIG_PATH"
 
+      - name: Debug - verify injected firebase-config.js
+        if: always()
+        run: |
+          CONFIG_PATH=$(find . -name "firebase-config.js" -not -path "./.git/*" | head -1)
+          echo "=== File contents after injection ==="
+          cat "$CONFIG_PATH"
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
