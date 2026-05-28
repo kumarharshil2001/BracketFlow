@@ -54,4 +54,6 @@ if (content.includes('__FIREBASE_')) {
 }
 
 fs.writeFileSync(configPath, content, 'utf8');
-console.log('Firebase config injected successfully into:', configPath);
+const workspaceRoot = process.env.GITHUB_WORKSPACE || process.cwd();
+const relativePath = path.relative(workspaceRoot, configPath);
+console.log('Firebase config injected successfully into:', relativePath.startsWith('..') ? path.basename(configPath) : relativePath || path.basename(configPath));

@@ -36,6 +36,38 @@ jobs:
           echo "Config file: $CONFIG_PATH"
           node .github/inject-config.js "$CONFIG_PATH"
 
+      - name: Debug - verify secret env vars
+        if: always()
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        run: |
+          mask() {
+            if [ -z "$1" ]; then
+              echo '<empty>'
+            elif [ ${#1} -le 8 ]; then
+              echo '****'
+            else
+              echo "${1:0:4}...${1: -4}"
+            fi
+          }
+          echo "FIREBASE_API_KEY present: ${FIREBASE_API_KEY:+yes}"
+          echo "FIREBASE_API_KEY masked: $(mask "$FIREBASE_API_KEY")"
+          echo "FIREBASE_AUTH_DOMAIN present: ${FIREBASE_AUTH_DOMAIN:+yes}"
+          echo "FIREBASE_AUTH_DOMAIN masked: $(mask "$FIREBASE_AUTH_DOMAIN")"
+          echo "FIREBASE_PROJECT_ID present: ${FIREBASE_PROJECT_ID:+yes}"
+          echo "FIREBASE_PROJECT_ID masked: $(mask "$FIREBASE_PROJECT_ID")"
+          echo "FIREBASE_STORAGE_BUCKET present: ${FIREBASE_STORAGE_BUCKET:+yes}"
+          echo "FIREBASE_STORAGE_BUCKET masked: $(mask "$FIREBASE_STORAGE_BUCKET")"
+          echo "FIREBASE_MESSAGING_SENDER_ID present: ${FIREBASE_MESSAGING_SENDER_ID:+yes}"
+          echo "FIREBASE_MESSAGING_SENDER_ID masked: $(mask "$FIREBASE_MESSAGING_SENDER_ID")"
+          echo "FIREBASE_APP_ID present: ${FIREBASE_APP_ID:+yes}"
+          echo "FIREBASE_APP_ID masked: $(mask "$FIREBASE_APP_ID")"
+
       - name: Debug - verify injected firebase-config.js
         if: always()
         run: |
