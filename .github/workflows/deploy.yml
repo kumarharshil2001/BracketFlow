@@ -33,8 +33,30 @@ jobs:
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
         run: |
           CONFIG_PATH=$(find . -name "firebase-config.js" -not -path "./.git/*" | head -1)
-          echo "Config file: $CONFIG_PATH"
-          node .github/inject-config.js "$CONFIG_PATH"
+          echo "CONFIG_PATH=$CONFIG_PATH" >> $GITHUB_ENV
+          echo "Found config at: $CONFIG_PATH"
+          node .github/inject-config.js "$CONFIG_PATH" || exit 1
+          echo "Injection completed successfully"
+
+      - name: Verify injected firebase-config.js
+        run: |
+          echo "=== Verifying injected config ==="
+          CONFIG_PATH=${{ env.CONFIG_PATH }}
+          if [ ! -f "$CONFIG_PATH" ]; then
+            echo "ERROR: Config file not found at $CONFIG_PATH"
+            exit 1
+          fi
+          echo "=== File contents ==="
+          cat "$CONFIG_PATH"
+          echo ""
+          echo "=== Checking for remaining placeholders ==="
+          if grep -q "__FIREBASE_" "$CONFIG_PATH"; then
+            echo "ERROR: Found uninjected Firebase placeholders!"
+            grep "__FIREBASE_" "$CONFIG_PATH" || true
+            exit 1
+          else
+            echo "SUCCESS: All Firebase values have been injected"
+          fi
 
       - name: Debug - verify secret env vars
         if: always()
