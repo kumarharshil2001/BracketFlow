@@ -14,6 +14,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Debug - find firebase-config.js
+        run: |
+          echo "=== Repo root contents ==="
+          ls -la
+          echo "=== Looking for firebase-config.js ==="
+          find . -name "firebase-config.js" 2>/dev/null
+          echo "=== File contents before injection ==="
+          find . -name "firebase-config.js" -exec cat {} \;
+
       - name: Inject Firebase config
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
@@ -23,20 +32,22 @@ jobs:
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
         run: |
+          CONFIG_PATH=$(find . -name "firebase-config.js" | head -1)
+          echo "Found config at: $CONFIG_PATH"
           node -e "
             const fs = require('fs');
-            const filePath = './firebase-config.js';
+            const filePath = process.env.CONFIG_PATH;
             let content = fs.readFileSync(filePath, 'utf8');
             content = content
-              .replace('FIREBASE_API_KEY', process.env.FIREBASE_API_KEY)
-              .replace('FIREBASE_AUTH_DOMAIN', process.env.FIREBASE_AUTH_DOMAIN)
-              .replace('FIREBASE_PROJECT_ID', process.env.FIREBASE_PROJECT_ID)
-              .replace('FIREBASE_STORAGE_BUCKET', process.env.FIREBASE_STORAGE_BUCKET)
-              .replace('FIREBASE_MESSAGING_SENDER_ID', process.env.FIREBASE_MESSAGING_SENDER_ID)
-              .replace('FIREBASE_APP_ID', process.env.FIREBASE_APP_ID);
+              .replace('__FIREBASE_API_KEY__', process.env.FIREBASE_API_KEY)
+              .replace('__FIREBASE_AUTH_DOMAIN__', process.env.FIREBASE_AUTH_DOMAIN)
+              .replace('__FIREBASE_PROJECT_ID__', process.env.FIREBASE_PROJECT_ID)
+              .replace('__FIREBASE_STORAGE_BUCKET__', process.env.FIREBASE_STORAGE_BUCKET)
+              .replace('__FIREBASE_MESSAGING_SENDER_ID__', process.env.FIREBASE_MESSAGING_SENDER_ID)
+              .replace('__FIREBASE_APP_ID__', process.env.FIREBASE_APP_ID);
             fs.writeFileSync(filePath, content);
-            console.log('Firebase config injected successfully');
-          "
+            console.log('Done. Replaced values in: ' + filePath);
+          " --env CONFIG_PATH="$CONFIG_PATH"
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
