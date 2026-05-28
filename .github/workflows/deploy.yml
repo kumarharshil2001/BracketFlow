@@ -15,12 +15,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ─────────────────────────────────────────────────────────────────
-      # Inject Firebase secrets into firebase-config.js using sed.
-      # Each sed command replaces one __PLACEHOLDER__ with the real value
-      # from GitHub Secrets. This runs entirely in bash — no Node.js
-      # script required, so there is no external-file dependency to break.
-      # ─────────────────────────────────────────────────────────────────
+      # ── STEP 1: Fail immediately if any secret is missing or empty ────────
+      # When a GitHub Secret is not set, Actions passes an empty string.
+      # sed then happily replaces placeholders with "", the verify grep
+      # finds no __FIREBASE_ tokens, reports "OK", and deploys blank values.
+      # This guard catches that before it happens.
+      - name: Validate secrets are present
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_AUTH_DOMAIN: ${{ secrets.FIREBASE_AUTH_DOMAIN }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        run: |
+          missing=()
+          [ -z "$FIREBASE_API_KEY" ]             && missing+=("FIREBASE_API_KEY")
+          [ -z "$FIREBASE_AUTH_DOMAIN" ]         && missing+=("FIREBASE_AUTH_DOMAIN")
+          [ -z "$FIREBASE_PROJECT_ID" ]          && missing+=("FIREBASE_PROJECT_ID")
+          [ -z "$FIREBASE_STORAGE_BUCKET" ]      && missing+=("FIREBASE_STORAGE_BUCKET")
+          [ -z "$FIREBASE_MESSAGING_SENDER_ID" ] && missing+=("FIREBASE_MESSAGING_SENDER_ID")
+          [ -z "$FIREBASE_APP_ID" ]              && missing+=("FIREBASE_APP_ID")
+
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo ""
+            echo "ERROR: The following GitHub Secrets are not set or are empty:"
+            printf '  - %s\n' "${missing[@]}"
+            echo ""
+            echo "Fix: go to your repo → Settings → Secrets and variables"
+            echo "     → Actions → New repository secret"
+            echo "     Add each missing secret with its real Firebase value."
+            exit 1
+          fi
+
+          echo "OK: All required secrets are present."
+
+      # ── STEP 2: Inject real values into firebase-config.js ───────────────
       - name: Inject Firebase config from secrets
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
@@ -30,22 +60,24 @@ jobs:
           FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
         run: |
-          sed -i "s|__FIREBASE_API_KEY__|${FIREBASE_API_KEY}|g"                     firebase-config.js
-          sed -i "s|__FIREBASE_AUTH_DOMAIN__|${FIREBASE_AUTH_DOMAIN}|g"             firebase-config.js
-          sed -i "s|__FIREBASE_PROJECT_ID__|${FIREBASE_PROJECT_ID}|g"               firebase-config.js
-          sed -i "s|__FIREBASE_STORAGE_BUCKET__|${FIREBASE_STORAGE_BUCKET}|g"       firebase-config.js
+          sed -i "s|__FIREBASE_API_KEY__|${FIREBASE_API_KEY}|g"                         firebase-config.js
+          sed -i "s|__FIREBASE_AUTH_DOMAIN__|${FIREBASE_AUTH_DOMAIN}|g"                 firebase-config.js
+          sed -i "s|__FIREBASE_PROJECT_ID__|${FIREBASE_PROJECT_ID}|g"                   firebase-config.js
+          sed -i "s|__FIREBASE_STORAGE_BUCKET__|${FIREBASE_STORAGE_BUCKET}|g"           firebase-config.js
           sed -i "s|__FIREBASE_MESSAGING_SENDER_ID__|${FIREBASE_MESSAGING_SENDER_ID}|g" firebase-config.js
-          sed -i "s|__FIREBASE_APP_ID__|${FIREBASE_APP_ID}|g"                       firebase-config.js
+          sed -i "s|__FIREBASE_APP_ID__|${FIREBASE_APP_ID}|g"                           firebase-config.js
 
-      - name: Verify injection (fail fast if any placeholder remains)
+      # ── STEP 3: Confirm no placeholder remains ────────────────────────────
+      - name: Verify injection
         run: |
           if grep -q "__FIREBASE_" firebase-config.js; then
-            echo "ERROR: Uninjected placeholders still present in firebase-config.js:"
+            echo "ERROR: Uninjected placeholders still present:"
             grep "__FIREBASE_" firebase-config.js
             exit 1
           fi
           echo "OK: All Firebase values injected successfully."
 
+      # ── STEP 4: Deploy ────────────────────────────────────────────────────
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
