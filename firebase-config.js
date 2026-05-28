@@ -4,12 +4,12 @@
  */
 
 const firebaseConfig = {
-    apiKey: "AIzaSyARm2Fy1SfbepEuTSvs5LcGPq5GZe7glmE",
-    authDomain: "bracketflow-58321.firebaseapp.com",
-    projectId: "bracketflow-58321",
-    storageBucket: "bracketflow-58321.firebasestorage.app",
-    messagingSenderId: "1071104966834",
-    appId: "1:1071104966834:web:40a1d0a4a864a8073fc9ab"
+    apiKey: "__FIREBASE_API_KEY__",
+    authDomain: "__FIREBASE_AUTH_DOMAIN__",
+    projectId: "__FIREBASE_PROJECT_ID__",
+    storageBucket: "__FIREBASE_STORAGE_BUCKET__",
+    messagingSenderId: "__FIREBASE_MESSAGING_SENDER_ID__",
+    appId: "__FIREBASE_APP_ID__"
 };
 
 // Initialize Firebase
