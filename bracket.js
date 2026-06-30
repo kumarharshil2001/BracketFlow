@@ -7,312 +7,326 @@
 const BracketEngine = {
     /**
      * Generate a full bracket structure for a tournament.
-     * Players are paired in the exact order provided — no power-of-2 padding, no auto-byes.
+     * The field is padded to the next power of two with BYE entries using
+     * standard tournament seeding, so every bracket is perfectly symmetric.
+     * BYE matches resolve automatically.
      */
     generate(participants, type, thirdPlace) {
         if (type === 'double') {
-            return this.generateDouble(participants, thirdPlace);
+            return this.generateDouble(participants);
         }
         return this.generateSingle(participants, thirdPlace);
     },
 
-    generateSingle(participants, thirdPlace) {
-        const winners = [];
-        let matchCounter = 0;
+    /** Smallest power of two >= n (minimum 2). */
+    nextPow2(n) {
+        let p = 1;
+        while (p < n) p <<= 1;
+        return Math.max(2, p);
+    },
 
-        // Round 1: pair participants sequentially in input order
-        const firstRound = [];
-        for (let i = 0; i < participants.length; i += 2) {
-            const player1 = participants[i];
-            const player2 = (i + 1 < participants.length) ? participants[i + 1] : null;
-
-            firstRound.push({
-                id: `w-r0-m${matchCounter++}`,
-                player1: player1,
-                player2: player2,
-                seed1: i + 1,
-                seed2: (i + 1 < participants.length) ? i + 2 : null,
-                winner: null,
-                loser: null,
-                nextMatchId: null,
-                nextSlot: null
-            });
-        }
-        winners.push(firstRound);
-
-        // Generate subsequent rounds based on previous round's match count
-        let prevRound = firstRound;
-        while (prevRound.length > 1) {
-            const round = [];
-            for (let i = 0; i < prevRound.length; i += 2) {
-                const match = {
-                    id: `w-r${winners.length}-m${matchCounter++}`,
-                    player1: null,
-                    player2: null,
-                    seed1: null,
-                    seed2: null,
-                    winner: null,
-                    loser: null,
-                    nextMatchId: null,
-                    nextSlot: null
-                };
-
-                // Link first match of pair
-                prevRound[i].nextMatchId = match.id;
-                prevRound[i].nextSlot = 'player1';
-
-                // Link second match of pair (if exists)
-                if (i + 1 < prevRound.length) {
-                    prevRound[i + 1].nextMatchId = match.id;
-                    prevRound[i + 1].nextSlot = 'player2';
-                } else {
-                    // Odd number of matches — this match only has one feeder
-                    match.singleFeeder = true;
-                }
-
-                round.push(match);
+    /** Standard seeding order for a power-of-two bracket (1 vs lowest, etc.). */
+    seedOrder(size) {
+        let order = [1, 2];
+        while (order.length < size) {
+            const sum = order.length * 2 + 1;
+            const next = [];
+            for (const s of order) {
+                next.push(s);
+                next.push(sum - s);
             }
-            winners.push(round);
-            prevRound = round;
+            order = next;
+        }
+        return order;
+    },
+
+    makeMatch(id, section, round, p1, p2, s1, s2) {
+        return {
+            id,
+            section,
+            round,
+            player1: p1 != null ? p1 : null,
+            player2: p2 != null ? p2 : null,
+            seed1: s1 != null ? s1 : null,
+            seed2: s2 != null ? s2 : null,
+            winner: null,
+            loser: null,
+            winnerTo: null,
+            loserTo: null
+        };
+    },
+
+    /** Build the seeded first round, padding with BYE up to a power of two. */
+    buildFirstRound(participants, counter) {
+        const size = this.nextPow2(participants.length);
+        const order = this.seedOrder(size);
+        const round = [];
+        for (let i = 0; i < size; i += 2) {
+            const s1 = order[i];
+            const s2 = order[i + 1];
+            const p1 = s1 <= participants.length ? participants[s1 - 1] : 'BYE';
+            const p2 = s2 <= participants.length ? participants[s2 - 1] : 'BYE';
+            round.push(this.makeMatch(`w-r0-m${counter.v++}`, 'winners', 0, p1, p2, s1, s2));
+        }
+        return round;
+    },
+
+    /** Build the empty advancing rounds of a winners-style bracket. */
+    buildWinnerRounds(first, totalRounds, counter) {
+        const rounds = [first];
+        let prev = first;
+        for (let r = 1; r < totalRounds; r++) {
+            const round = [];
+            for (let i = 0; i < prev.length; i += 2) {
+                const m = this.makeMatch(`w-r${r}-m${counter.v++}`, 'winners', r, null, null, null, null);
+                prev[i].winnerTo = { matchId: m.id, slot: 'player1' };
+                prev[i + 1].winnerTo = { matchId: m.id, slot: 'player2' };
+                round.push(m);
+            }
+            rounds.push(round);
+            prev = round;
+        }
+        return rounds;
+    },
+
+    generateSingle(participants, thirdPlace) {
+        const counter = { v: 0 };
+        const first = this.buildFirstRound(participants, counter);
+        const totalRounds = Math.log2(first.length * 2);
+        const winners = this.buildWinnerRounds(first, totalRounds, counter);
+
+        const bracket = { type: 'single', winners, rounds: totalRounds };
+
+        if (thirdPlace && totalRounds >= 2) {
+            const tp = this.makeMatch('tp-m0', 'third', totalRounds - 1, null, null, null, null);
+            const semis = winners[totalRounds - 2];
+            semis[0].loserTo = { matchId: tp.id, slot: 'player1' };
+            semis[1].loserTo = { matchId: tp.id, slot: 'player2' };
+            bracket.thirdPlace = tp;
         }
 
-        const totalRounds = winners.length;
-        const bracket = { winners, rounds: totalRounds, type: 'single' };
-
-        // Third place match
-        if (thirdPlace) {
-            bracket.thirdPlace = {
-                id: `tp-m${matchCounter++}`,
-                player1: null,
-                player2: null,
-                winner: null,
-                loser: null,
-                section: 'finals'
-            };
-        }
-
+        this.resolveByes(bracket);
         return bracket;
     },
 
-    generateDouble(participants, thirdPlace) {
-        // Generate winners bracket
-        const singleBracket = this.generateSingle(participants, false);
-        const winners = singleBracket.winners;
-        const totalRounds = singleBracket.rounds;
+    generateDouble(participants) {
+        const counter = { v: 0 };
+        const first = this.buildFirstRound(participants, counter);
+        const k = Math.log2(first.length * 2); // winners-bracket rounds
+        const winners = this.buildWinnerRounds(first, k, counter);
 
-        // Generate losers bracket
+        // Losers bracket: 2*(k-1) rounds, sizes N/4, N/4, N/8, N/8, ... 1, 1.
         const losers = [];
-        let matchCounter = 1000;
-        const losersRoundCount = Math.max(1, (totalRounds - 1) * 2);
-
-        let prevCount = Math.ceil(winners[0].length / 2);
-        for (let r = 0; r < losersRoundCount; r++) {
+        let lc = 1000;
+        const lbRounds = 2 * (k - 1);
+        for (let r = 0; r < lbRounds; r++) {
+            const pair = Math.floor(r / 2);
+            const size = Math.max(1, Math.pow(2, k - pair - 2));
             const round = [];
-            let count;
-            if (r === 0) {
-                count = prevCount;
-            } else {
-                count = r % 2 === 0 ? Math.ceil(losers[r - 1].length / 2) : losers[r - 1].length;
-            }
-            count = Math.max(1, count);
-
-            for (let i = 0; i < count; i++) {
-                round.push({
-                    id: `l-r${r}-m${matchCounter++}`,
-                    player1: null,
-                    player2: null,
-                    seed1: null,
-                    seed2: null,
-                    winner: null,
-                    loser: null,
-                    nextMatchId: null,
-                    nextSlot: null
-                });
+            for (let i = 0; i < size; i++) {
+                round.push(this.makeMatch(`l-r${r}-m${lc++}`, 'losers', r, null, null, null, null));
             }
             losers.push(round);
         }
 
-        // Link losers bracket rounds
+        // Link losers-bracket progression.
+        // Even (minor) rounds feed 1:1 into the next major round's player1.
+        // Odd (major) rounds combine in pairs into the next minor round.
         for (let r = 0; r < losers.length - 1; r++) {
-            const currentRound = losers[r];
-            const nextRound = losers[r + 1];
-            if (nextRound.length < currentRound.length) {
-                // Consolidation round
-                for (let i = 0; i < currentRound.length; i += 2) {
-                    const nextIdx = Math.floor(i / 2);
-                    if (nextIdx < nextRound.length) {
-                        currentRound[i].nextMatchId = nextRound[nextIdx].id;
-                        currentRound[i].nextSlot = 'player1';
-                        if (i + 1 < currentRound.length) {
-                            currentRound[i + 1].nextMatchId = nextRound[nextIdx].id;
-                            currentRound[i + 1].nextSlot = 'player2';
-                        }
-                    }
+            const round = losers[r];
+            const next = losers[r + 1];
+            const isMajor = r % 2 === 1;
+            if (isMajor) {
+                for (let i = 0; i < round.length; i++) {
+                    round[i].winnerTo = {
+                        matchId: next[Math.floor(i / 2)].id,
+                        slot: i % 2 === 0 ? 'player1' : 'player2'
+                    };
                 }
             } else {
-                // Same-size round (drop-down round)
-                for (let i = 0; i < currentRound.length; i++) {
-                    if (i < nextRound.length) {
-                        currentRound[i].nextMatchId = nextRound[i].id;
-                        currentRound[i].nextSlot = 'player1';
+                for (let i = 0; i < round.length; i++) {
+                    round[i].winnerTo = { matchId: next[i].id, slot: 'player1' };
+                }
+            }
+        }
+
+        // Route winners-bracket losers into the losers bracket.
+        if (lbRounds > 0) {
+            // WB round 0 losers -> LB round 0 (two per match).
+            first.forEach((m, i) => {
+                m.loserTo = {
+                    matchId: losers[0][Math.floor(i / 2)].id,
+                    slot: i % 2 === 0 ? 'player1' : 'player2'
+                };
+            });
+            // WB round r (r>=1) losers -> LB round (2r-1), filling player2.
+            for (let r = 1; r < k; r++) {
+                const lbRound = losers[2 * r - 1];
+                winners[r].forEach((m, i) => {
+                    if (lbRound && lbRound[i]) {
+                        m.loserTo = { matchId: lbRound[i].id, slot: 'player2' };
                     }
-                }
+                });
             }
         }
 
-        // Grand finals
-        const grandFinals = {
-            id: `gf-m${matchCounter++}`,
-            player1: null,
-            player2: null,
-            winner: null,
-            loser: null,
-            section: 'finals'
-        };
+        // Grand finals.
+        const gf = this.makeMatch('gf-m0', 'grand', k, null, null, null, null);
+        const wbFinal = winners[k - 1][0];
+        wbFinal.winnerTo = { matchId: gf.id, slot: 'player1' };
+        if (lbRounds === 0) {
+            wbFinal.loserTo = { matchId: gf.id, slot: 'player2' };
+        } else {
+            const lbFinal = losers[losers.length - 1][0];
+            lbFinal.winnerTo = { matchId: gf.id, slot: 'player2' };
+        }
 
-        return {
-            winners,
-            losers,
-            grandFinals,
-            rounds: totalRounds,
-            type: 'double'
-        };
+        const bracket = { type: 'double', winners, losers, grandFinals: gf, rounds: k };
+        this.resolveByes(bracket);
+        return bracket;
     },
 
-    /**
-     * Clear downstream results when a match result is changed.
-     */
+    /** Apply a decided result and push players forward (no downstream clearing). */
+    applyResult(bracket, match, winner) {
+        const loser = match.player1 === winner ? match.player2 : match.player1;
+        match.winner = winner;
+        match.loser = loser;
+        if (match.winnerTo) {
+            const t = this.findMatchById(bracket, match.winnerTo.matchId);
+            if (t) {
+                t[match.winnerTo.slot] = winner;
+                this.autoResolve(bracket, t);
+            }
+        }
+        if (match.loserTo) {
+            const t = this.findMatchById(bracket, match.loserTo.matchId);
+            if (t) {
+                t[match.loserTo.slot] = loser;
+                this.autoResolve(bracket, t);
+            }
+        }
+    },
+
+    /** Auto-advance a match if it has become a BYE pairing. */
+    autoResolve(bracket, match) {
+        if (match.winner || !match.player1 || !match.player2) return;
+        const p1Bye = match.player1 === 'BYE';
+        const p2Bye = match.player2 === 'BYE';
+        if (p1Bye && !p2Bye) this.applyResult(bracket, match, match.player2);
+        else if (p2Bye && !p1Bye) this.applyResult(bracket, match, match.player1);
+        else if (p1Bye && p2Bye) this.applyResult(bracket, match, 'BYE');
+    },
+
+    /** Resolve every BYE across a freshly generated bracket. */
+    resolveByes(bracket) {
+        const visit = (rounds) => {
+            if (!rounds) return;
+            for (const round of rounds) {
+                for (const m of round) this.autoResolve(bracket, m);
+            }
+        };
+        visit(bracket.winners);
+        visit(bracket.losers);
+        if (bracket.grandFinals) this.autoResolve(bracket, bracket.grandFinals);
+        if (bracket.thirdPlace) this.autoResolve(bracket, bracket.thirdPlace);
+    },
+
+    /** Record a user-selected winner, clearing any stale downstream results. */
+    setResult(bracket, matchId, winner) {
+        const match = this.findMatchById(bracket, matchId);
+        if (!match || !match.player1 || !match.player2) return false;
+        if (winner !== match.player1 && winner !== match.player2) return false;
+        if (match.winner) this.clearDownstream(bracket, match);
+        this.applyResult(bracket, match, winner);
+        return true;
+    },
+
+    /** Clear results that depended on this match's outcome. */
     clearDownstream(bracket, match) {
-        if (!match.nextMatchId) return;
-        const nextMatch = this.findMatchById(bracket, match.nextMatchId);
-        if (!nextMatch) return;
-
-        // Clear the slot this match feeds into
-        nextMatch[match.nextSlot] = null;
-
-        // If the next match had a winner, clear it and cascade
-        if (nextMatch.winner) {
-            nextMatch.winner = null;
-            nextMatch.loser = null;
-            this.clearDownstream(bracket, nextMatch);
-        }
+        const clearLink = (link) => {
+            if (!link) return;
+            const t = this.findMatchById(bracket, link.matchId);
+            if (!t) return;
+            const hadResult = !!t.winner;
+            t[link.slot] = null;
+            if (hadResult) {
+                t.winner = null;
+                t.loser = null;
+                this.clearDownstream(bracket, t);
+            }
+        };
+        clearLink(match.winnerTo);
+        clearLink(match.loserTo);
     },
 
-    /**
-     * Advance a winner to the next match in the bracket.
-     */
-    advanceWinner(bracket, match, winner, loser, section) {
-        // Clear any previous downstream results from this match
-        this.clearDownstream(bracket, match);
-
-        // Advance to next match
-        if (match.nextMatchId) {
-            const nextMatch = this.findMatchById(bracket, match.nextMatchId);
-            if (nextMatch) {
-                nextMatch[match.nextSlot] = winner;
-            }
-        }
-
-        // For double elimination, send loser to losers bracket
-        if (bracket.type === 'double' && section === 'winners') {
-            this.sendToLosers(bracket, match, loser);
-        }
-
-        // Handle third place for single elimination
-        if (bracket.type === 'single' && bracket.thirdPlace && bracket.winners.length >= 2) {
-            const semiRound = bracket.winners[bracket.winners.length - 2];
-            const semiLosers = semiRound.filter(m => m.loser).map(m => m.loser);
-            if (semiLosers.length >= 2) {
-                bracket.thirdPlace.player1 = semiLosers[0];
-                bracket.thirdPlace.player2 = semiLosers[1];
-            }
-        }
-
-        // For double elimination - losers bracket champion goes to grand finals
-        if (bracket.type === 'double' && section === 'losers') {
-            const lastLosersRound = bracket.losers[bracket.losers.length - 1];
-            if (lastLosersRound && lastLosersRound.length === 1 && lastLosersRound[0].id === match.id) {
-                bracket.grandFinals.player2 = winner;
-            }
-        }
-
-        // Winners bracket champion goes to grand finals
-        if (bracket.type === 'double' && section === 'winners') {
-            const finalRound = bracket.winners[bracket.winners.length - 1];
-            if (finalRound.length === 1 && finalRound[0].id === match.id) {
-                bracket.grandFinals.player1 = winner;
-            }
-        }
-    },
-
-    sendToLosers(bracket, match, loser) {
-        if (!bracket.losers || bracket.losers.length === 0) return;
-
-        for (const round of bracket.losers) {
-            for (const losersMatch of round) {
-                if (!losersMatch.player1) {
-                    losersMatch.player1 = loser;
-                    return;
-                }
-                if (!losersMatch.player2) {
-                    losersMatch.player2 = loser;
-                    return;
-                }
-            }
-        }
-    },
-
-    /**
-     * Update a player's name in a specific match slot.
-     * Cascades the name change to downstream matches if this player was the winner.
-     */
+    /** Rename a player and cascade the change to every downstream appearance. */
     updatePlayerName(bracket, matchId, slot, newName) {
         const match = this.findMatchById(bracket, matchId);
         if (!match) return;
-
         const oldName = match[slot];
         match[slot] = newName || null;
+        if (!oldName || oldName === newName) return;
 
-        // If this player was the winner, update downstream
-        if (match.winner && match.winner === oldName) {
-            match.winner = newName || null;
-            // Update the name in the next match slot
-            if (match.nextMatchId) {
-                const nextMatch = this.findMatchById(bracket, match.nextMatchId);
-                if (nextMatch && nextMatch[match.nextSlot] === oldName) {
-                    nextMatch[match.nextSlot] = newName || null;
-                    // If next match winner was also this player, cascade further
-                    if (nextMatch.winner === oldName) {
-                        this.updatePlayerName(bracket, nextMatch.id,
-                            nextMatch.winner === nextMatch.player1 ? 'player1' : 'player2', newName);
-                    }
-                }
+        const cascade = (link) => {
+            if (!link) return;
+            const t = this.findMatchById(bracket, link.matchId);
+            if (t && t[link.slot] === oldName) {
+                t[link.slot] = newName || null;
+                propagate(t);
             }
-        }
+        };
+        const propagate = (m) => {
+            if (m.winner === oldName) {
+                m.winner = newName || null;
+                cascade(m.winnerTo);
+            }
+            if (m.loser === oldName) {
+                m.loser = newName || null;
+                cascade(m.loserTo);
+            }
+        };
+        propagate(match);
     },
 
     findMatchById(bracket, matchId) {
-        if (bracket.winners) {
-            for (const round of bracket.winners) {
-                for (const match of round) {
-                    if (match.id === matchId) return match;
-                }
+        const scan = (rounds) => {
+            if (!rounds) return null;
+            for (const round of rounds) {
+                for (const m of round) if (m.id === matchId) return m;
             }
+            return null;
+        };
+        return scan(bracket.winners) ||
+            scan(bracket.losers) ||
+            (bracket.grandFinals && bracket.grandFinals.id === matchId ? bracket.grandFinals : null) ||
+            (bracket.thirdPlace && bracket.thirdPlace.id === matchId ? bracket.thirdPlace : null);
+    },
+
+    /** Count decidable matches (excluding BYEs) and how many are decided. */
+    getStats(bracket) {
+        let total = 0;
+        let decided = 0;
+        const tally = (m) => {
+            if (!m) return;
+            if (m.player1 === 'BYE' || m.player2 === 'BYE') return;
+            total++;
+            if (m.winner) decided++;
+        };
+        const visit = (rounds) => { if (rounds) rounds.forEach(r => r.forEach(tally)); };
+        visit(bracket.winners);
+        visit(bracket.losers);
+        tally(bracket.grandFinals);
+        tally(bracket.thirdPlace);
+        return { total, decided };
+    },
+
+    /** Overall tournament champion, if decided. */
+    getChampion(bracket) {
+        if (bracket.type === 'double') {
+            return bracket.grandFinals ? bracket.grandFinals.winner : null;
         }
-        if (bracket.losers) {
-            for (const round of bracket.losers) {
-                for (const match of round) {
-                    if (match.id === matchId) return match;
-                }
-            }
-        }
-        if (bracket.grandFinals && bracket.grandFinals.id === matchId) {
-            return bracket.grandFinals;
-        }
-        if (bracket.thirdPlace && bracket.thirdPlace.id === matchId) {
-            return bracket.thirdPlace;
-        }
-        return null;
+        const finalRound = bracket.winners[bracket.winners.length - 1];
+        return finalRound && finalRound[0] ? finalRound[0].winner : null;
     }
 };
 
@@ -322,42 +336,12 @@ const BracketRenderer = {
 
     renderSingle(tournament) {
         const bracket = tournament.bracket;
-        const winners = bracket.winners;
-        let html = '<div class="bracket-wrapper" id="bracketTree">';
+        const cols = this.renderColumns(bracket.winners, 'single', this.getRoundNames(bracket.winners.length));
+        const champ = BracketEngine.getChampion(bracket);
+        let html = `<div class="bracket-wrapper" id="bracketTree">${cols}` +
+            (champ && champ !== 'BYE' ? this.championColumn('Champion', '🏆', champ) : '') +
+            '</div>';
 
-        const roundNames = this.getRoundNames(winners.length);
-
-        winners.forEach((round, rIdx) => {
-            html += `<div class="bracket-round" data-round="${rIdx}">`;
-            html += `<div class="round-title">${roundNames[rIdx]}</div>`;
-            html += '<div class="round-matches">';
-
-            round.forEach(match => {
-                html += this.renderMatch(match, 'single');
-            });
-
-            html += '</div></div>';
-        });
-
-        // Champion display
-        const finalMatch = winners[winners.length - 1][0];
-        if (finalMatch && finalMatch.winner) {
-            html += `
-                <div class="bracket-round">
-                    <div class="round-title">Champion</div>
-                    <div class="round-matches">
-                        <div class="champion-display">
-                            <div class="trophy">🏆</div>
-                            <div class="champion-label">Champion</div>
-                            <div class="champion-name">${this.escapeHtml(finalMatch.winner)}</div>
-                        </div>
-                    </div>
-                </div>`;
-        }
-
-        html += '</div>';
-
-        // Third place match
         if (bracket.thirdPlace) {
             html += `
                 <div class="third-place-section">
@@ -369,143 +353,112 @@ const BracketRenderer = {
                     </div>
                 </div>`;
         }
-
         return html;
     },
 
     renderWinners(tournament) {
         const bracket = tournament.bracket;
-        const winners = bracket.winners;
-        let html = '<div class="bracket-wrapper" id="bracketTree">';
-
-        const roundNames = this.getRoundNames(winners.length);
-
-        winners.forEach((round, rIdx) => {
-            html += `<div class="bracket-round" data-round="${rIdx}">`;
-            html += `<div class="round-title">${roundNames[rIdx]}</div>`;
-            html += '<div class="round-matches">';
-            round.forEach(match => {
-                html += this.renderMatch(match, 'winners');
-            });
-            html += '</div></div>';
-        });
-
-        const finalMatch = winners[winners.length - 1][0];
-        if (finalMatch && finalMatch.winner) {
-            html += `
-                <div class="bracket-round">
-                    <div class="round-title">WB Champion</div>
-                    <div class="round-matches">
-                        <div class="champion-display">
-                            <div class="trophy">👑</div>
-                            <div class="champion-label">Winners Bracket Champion</div>
-                            <div class="champion-name">${this.escapeHtml(finalMatch.winner)}</div>
-                        </div>
-                    </div>
-                </div>`;
-        }
-
-        html += '</div>';
-        return html;
+        const cols = this.renderColumns(bracket.winners, 'winners', this.getRoundNames(bracket.winners.length));
+        const finalMatch = bracket.winners[bracket.winners.length - 1][0];
+        const champ = finalMatch ? finalMatch.winner : null;
+        return `<div class="bracket-wrapper" id="bracketTree">${cols}` +
+            (champ && champ !== 'BYE' ? this.championColumn('Winners Champion', '👑', champ) : '') +
+            '</div>';
     },
 
     renderLosers(tournament) {
-        const bracket = tournament.bracket;
-        const losers = bracket.losers;
-
+        const losers = tournament.bracket.losers;
         if (!losers || losers.length === 0) {
-            return '<p style="color: var(--text-muted); padding: 40px; text-align:center;">No losers bracket matches yet.</p>';
+            return '<p class="bracket-empty">This tournament has no losers bracket.</p>';
         }
-
-        let html = '<div class="bracket-wrapper" id="bracketTree">';
-
-        losers.forEach((round, rIdx) => {
-            html += `<div class="bracket-round" data-round="${rIdx}">`;
-            html += `<div class="round-title">LB Round ${rIdx + 1}</div>`;
-            html += '<div class="round-matches">';
-            round.forEach(match => {
-                html += this.renderMatch(match, 'losers');
-            });
-            html += '</div></div>';
-        });
-
-        const lastRound = losers[losers.length - 1];
-        if (lastRound && lastRound.length === 1 && lastRound[0].winner) {
-            html += `
-                <div class="bracket-round">
-                    <div class="round-title">LB Champion</div>
-                    <div class="round-matches">
-                        <div class="champion-display">
-                            <div class="trophy">⚔️</div>
-                            <div class="champion-label">Losers Bracket Champion</div>
-                            <div class="champion-name">${this.escapeHtml(lastRound[0].winner)}</div>
-                        </div>
-                    </div>
-                </div>`;
-        }
-
-        html += '</div>';
-        return html;
+        const names = losers.map((_, i) => `Losers Round ${i + 1}`);
+        const cols = this.renderColumns(losers, 'losers', names);
+        const last = losers[losers.length - 1];
+        const champ = last && last.length === 1 ? last[0].winner : null;
+        return `<div class="bracket-wrapper" id="bracketTree">${cols}` +
+            (champ && champ !== 'BYE' ? this.championColumn('Losers Champion', '⚔️', champ) : '') +
+            '</div>';
     },
 
     renderFinals(tournament) {
-        const bracket = tournament.bracket;
-        const gf = bracket.grandFinals;
+        const gf = tournament.bracket.grandFinals;
+        if (!gf) return '<p class="bracket-empty">Grand Finals not available.</p>';
 
-        if (!gf) {
-            return '<p style="color: var(--text-muted); padding: 40px; text-align:center;">Grand Finals not available.</p>';
-        }
-
-        let html = '<div style="max-width: 400px; margin: 40px auto;">';
-        html += '<div class="round-title" style="text-align: center; margin-bottom: 20px;">Grand Finals</div>';
+        let html = '<div class="finals-wrap">';
+        html += '<div class="round-title finals-title">Grand Finals</div>';
         html += this.renderMatch(gf, 'finals');
-
         if (gf.winner) {
             html += `
-                <div class="champion-display" style="margin-top: 24px;">
+                <div class="champion-display">
                     <div class="trophy">🏆</div>
                     <div class="champion-label">Tournament Champion</div>
                     <div class="champion-name">${this.escapeHtml(gf.winner)}</div>
                 </div>`;
         }
-
         html += '</div>';
         return html;
     },
 
-    renderMatch(match, section) {
-        const isCompleted = match.winner ? 'completed' : '';
+    renderColumns(rounds, section, names) {
+        let html = '';
+        rounds.forEach((round, rIdx) => {
+            html += `<div class="bracket-round" data-round="${rIdx}">`;
+            html += `<div class="round-title">${names[rIdx]}</div>`;
+            html += '<div class="round-matches">';
+            round.forEach(match => {
+                html += this.renderMatch(match, section);
+            });
+            html += '</div></div>';
+        });
+        return html;
+    },
 
+    championColumn(label, icon, name) {
+        return `
+            <div class="bracket-round champion-round">
+                <div class="round-title">${this.escapeHtml(label)}</div>
+                <div class="round-matches">
+                    <div class="champion-display">
+                        <div class="trophy">${icon}</div>
+                        <div class="champion-label">${this.escapeHtml(label)}</div>
+                        <div class="champion-name">${this.escapeHtml(name)}</div>
+                    </div>
+                </div>
+            </div>`;
+    },
+
+    renderMatch(match, section) {
         const p1Name = match.player1 || '';
         const p2Name = match.player2 || '';
+        const p1Bye = p1Name === 'BYE';
+        const p2Bye = p2Name === 'BYE';
+        const isCompleted = match.winner ? 'completed' : '';
+
         const p1Display = p1Name || 'TBD';
         const p2Display = p2Name || 'TBD';
 
-        const p1Class = match.winner && match.winner === match.player1 ? 'winner' : (match.winner && match.winner !== match.player1 ? 'loser' : '');
-        const p2Class = match.winner && match.winner === match.player2 ? 'winner' : (match.winner && match.winner !== match.player2 ? 'loser' : '');
-        const nameClass1 = !p1Name ? 'tbd' : (p1Name === 'BYE' ? 'bye' : '');
-        const nameClass2 = !p2Name ? 'tbd' : (p2Name === 'BYE' ? 'bye' : '');
+        const p1Class = match.winner ? (match.winner === match.player1 ? 'winner' : 'loser') : '';
+        const p2Class = match.winner ? (match.winner === match.player2 ? 'winner' : 'loser') : '';
+        const nameClass1 = !p1Name ? 'tbd' : (p1Bye ? 'bye' : '');
+        const nameClass2 = !p2Name ? 'tbd' : (p2Bye ? 'bye' : '');
 
-        // Match is clickable for winner selection if both players present
-        let clickable = '';
-        if (p1Name && p2Name) {
-            clickable = `data-match="${match.id}" data-section="${section}"`;
-        }
+        const decidable = p1Name && p2Name && !p1Bye && !p2Bye;
+        const clickable = decidable ? `data-match="${match.id}" data-section="${section}"` : '';
+        const nextAttr = match.winnerTo ? ` data-next="${match.winnerTo.matchId}"` : '';
 
         return `
-            <div class="bracket-match ${isCompleted}" ${clickable}>
-                <button class="card-delete-btn" data-match-id="${match.id}" title="Delete match">&times;</button>
+            <div class="bracket-match ${isCompleted} ${decidable ? '' : 'locked'}" data-id="${match.id}"${nextAttr} ${clickable}>
                 <div class="match-slot ${p1Class}" data-match-id="${match.id}" data-slot="player1">
-                    ${match.seed1 ? `<span class="slot-seed">${match.seed1}</span>` : '<span class="slot-seed">-</span>'}
+                    <span class="slot-seed">${match.seed1 ? match.seed1 : '·'}</span>
                     <span class="slot-name ${nameClass1}" data-editable="true">${this.escapeHtml(p1Display)}</span>
                     <button class="edit-name-btn" data-match-id="${match.id}" data-slot="player1" title="Edit name">✎</button>
                 </div>
                 <div class="match-slot ${p2Class}" data-match-id="${match.id}" data-slot="player2">
-                    ${match.seed2 ? `<span class="slot-seed">${match.seed2}</span>` : '<span class="slot-seed">-</span>'}
+                    <span class="slot-seed">${match.seed2 ? match.seed2 : '·'}</span>
                     <span class="slot-name ${nameClass2}" data-editable="true">${this.escapeHtml(p2Display)}</span>
                     <button class="edit-name-btn" data-match-id="${match.id}" data-slot="player2" title="Edit name">✎</button>
                 </div>
-                </div>`;
+            </div>`;
     },
 
     getRoundNames(totalRounds) {
@@ -515,34 +468,37 @@ const BracketRenderer = {
             if (remaining === 1) names.push('Final');
             else if (remaining === 2) names.push('Semifinals');
             else if (remaining === 3) names.push('Quarterfinals');
-            else names.push(`Round ${i + 1}`);
+            else names.push(`Round of ${Math.pow(2, remaining)}`);
         }
         return names;
     },
 
     escapeHtml(str) {
-        if (!str) return '';
+        if (str == null) return '';
         const div = document.createElement('div');
         div.textContent = str;
         return div.innerHTML;
     },
 
     /**
-     * Draw SVG connector lines between rounds after the bracket DOM is rendered.
-     * Call this after innerHTML is set and the elements are in the DOM.
+     * Draw SVG connector lines following each match's winnerTo link.
+     * Works for both the winners and losers brackets and any mapping ratio.
      */
     drawConnectors(containerEl) {
-        const wrapper = containerEl.querySelector('.bracket-wrapper');
-        if (!wrapper) return;
+        const wrappers = containerEl.querySelectorAll('.bracket-wrapper');
+        wrappers.forEach(wrapper => this.drawWrapperConnectors(wrapper));
+    },
 
-        // Remove any existing SVG
-        const existingSvg = wrapper.querySelector('.bracket-connectors');
-        if (existingSvg) existingSvg.remove();
+    drawWrapperConnectors(wrapper) {
+        const existing = wrapper.querySelector('.bracket-connectors');
+        if (existing) existing.remove();
 
-        const rounds = wrapper.querySelectorAll('.bracket-round');
-        if (rounds.length < 2) return;
+        const matches = wrapper.querySelectorAll('.bracket-match[data-id]');
+        if (matches.length < 2) return;
 
-        // Create SVG overlay
+        const byId = {};
+        matches.forEach(el => { byId[el.dataset.id] = el; });
+
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
         svg.classList.add('bracket-connectors');
         svg.style.position = 'absolute';
@@ -552,89 +508,35 @@ const BracketRenderer = {
         svg.style.height = wrapper.scrollHeight + 'px';
         svg.style.pointerEvents = 'none';
         svg.style.zIndex = '1';
-
         wrapper.style.position = 'relative';
 
-        const wrapperRect = wrapper.getBoundingClientRect();
+        const wrapRect = wrapper.getBoundingClientRect();
+        const stroke = getComputedStyle(document.documentElement)
+            .getPropertyValue('--connector').trim() || '#3d3d5c';
 
-        for (let r = 0; r < rounds.length - 1; r++) {
-            const currentMatches = rounds[r].querySelectorAll('.bracket-match');
-            const nextMatches = rounds[r + 1].querySelectorAll('.bracket-match');
+        matches.forEach(el => {
+            const nextId = el.dataset.next;
+            if (!nextId) return;
+            const target = byId[nextId];
+            if (!target) return;
 
-            if (nextMatches.length === 0) continue;
+            const a = el.getBoundingClientRect();
+            const b = target.getBoundingClientRect();
+            const x1 = a.right - wrapRect.left;
+            const y1 = a.top + a.height / 2 - wrapRect.top;
+            const x2 = b.left - wrapRect.left;
+            const y2 = b.top + b.height / 2 - wrapRect.top;
+            const midX = x1 + (x2 - x1) / 2;
 
-            // Each pair of current matches connects to one next match
-            let nextIdx = 0;
-            for (let i = 0; i < currentMatches.length; i += 2) {
-                if (nextIdx >= nextMatches.length) break;
-
-                const match1 = currentMatches[i];
-                const match2 = currentMatches[i + 1];
-                const target = nextMatches[nextIdx];
-
-                const rect1 = match1.getBoundingClientRect();
-                const targetRect = target.getBoundingClientRect();
-
-                // Start point: right edge, vertical center of match1
-                const x1 = rect1.right - wrapperRect.left;
-                const y1 = rect1.top + rect1.height / 2 - wrapperRect.top;
-
-                // End point: left edge, vertical center of target
-                const x3 = targetRect.left - wrapperRect.left;
-                const y3 = targetRect.top + targetRect.height / 2 - wrapperRect.top;
-
-                // Midpoint X for the elbow
-                const midX = (x1 + x3) / 2;
-
-                // Draw line from match1 to target
-                const path1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path1.setAttribute('d', `M${x1},${y1} H${midX} V${y3} H${x3}`);
-                path1.setAttribute('fill', 'none');
-                path1.setAttribute('stroke', '#3d3d5c');
-                path1.setAttribute('stroke-width', '2');
-                path1.setAttribute('stroke-linecap', 'round');
-                svg.appendChild(path1);
-
-                // Draw line from match2 to target (if match2 exists)
-                if (match2) {
-                    const rect2 = match2.getBoundingClientRect();
-                    const x2 = rect2.right - wrapperRect.left;
-                    const y2 = rect2.top + rect2.height / 2 - wrapperRect.top;
-
-                    const path2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                    path2.setAttribute('d', `M${x2},${y2} H${midX} V${y3} H${x3}`);
-                    path2.setAttribute('fill', 'none');
-                    path2.setAttribute('stroke', '#3d3d5c');
-                    path2.setAttribute('stroke-width', '2');
-                    path2.setAttribute('stroke-linecap', 'round');
-                    svg.appendChild(path2);
-                }
-
-                nextIdx++;
-            }
-
-            // Handle odd match (unpaired last match connects solo to next)
-            if (currentMatches.length % 2 === 1 && nextIdx < nextMatches.length) {
-                const lastMatch = currentMatches[currentMatches.length - 1];
-                const target = nextMatches[nextIdx];
-                const rectL = lastMatch.getBoundingClientRect();
-                const rectT = target.getBoundingClientRect();
-
-                const x1 = rectL.right - wrapperRect.left;
-                const y1 = rectL.top + rectL.height / 2 - wrapperRect.top;
-                const x3 = rectT.left - wrapperRect.left;
-                const y3 = rectT.top + rectT.height / 2 - wrapperRect.top;
-                const midX = (x1 + x3) / 2;
-
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path.setAttribute('d', `M${x1},${y1} H${midX} V${y3} H${x3}`);
-                path.setAttribute('fill', 'none');
-                path.setAttribute('stroke', '#3d3d5c');
-                path.setAttribute('stroke-width', '2');
-                path.setAttribute('stroke-linecap', 'round');
-                svg.appendChild(path);
-            }
-        }
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('d', `M${x1},${y1} H${midX} V${y2} H${x2}`);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', stroke);
+            path.setAttribute('stroke-width', '2');
+            path.setAttribute('stroke-linecap', 'round');
+            path.setAttribute('stroke-linejoin', 'round');
+            svg.appendChild(path);
+        });
 
         wrapper.appendChild(svg);
     }

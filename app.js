@@ -143,11 +143,35 @@
 
         const activeNav = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
         if (activeNav) activeNav.classList.add('active');
+        closeSidebar();
     }
 
     navBtns.forEach(btn => {
         btn.addEventListener('click', () => switchView(btn.dataset.view));
     });
+
+    // ===== Mobile Sidebar Drawer =====
+    const sidebarEl = document.getElementById('sidebar');
+    const menuToggle = document.getElementById('menuToggle');
+    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+
+    function openSidebar() {
+        if (sidebarEl) sidebarEl.classList.add('open');
+        if (sidebarBackdrop) sidebarBackdrop.classList.add('visible');
+    }
+
+    function closeSidebar() {
+        if (sidebarEl) sidebarEl.classList.remove('open');
+        if (sidebarBackdrop) sidebarBackdrop.classList.remove('visible');
+    }
+
+    if (menuToggle) menuToggle.addEventListener('click', openSidebar);
+    if (sidebarBackdrop) sidebarBackdrop.addEventListener('click', closeSidebar);
+    if (sidebarEl) {
+        sidebarEl.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', closeSidebar);
+        });
+    }
 
     // ===== Dashboard =====
     const tournamentsGrid = document.getElementById('tournamentsGrid');
@@ -175,6 +199,9 @@
             const badgeClass = t.type === 'double' ? 'badge-double' : 'badge-single';
             const participants = t.participants ? t.participants.length : 0;
             const rounds = t.bracket ? t.bracket.rounds : 0;
+            const stats = t.bracket ? BracketEngine.getStats(t.bracket) : { total: 0, decided: 0 };
+            const pct = stats.total ? Math.round((stats.decided / stats.total) * 100) : 0;
+            const champ = t.bracket ? BracketEngine.getChampion(t.bracket) : null;
 
             card.innerHTML = `
                 <div class="card-header">
@@ -185,7 +212,12 @@
                     <span>${participants} participants</span>
                     <span>${rounds} rounds</span>
                 </div>
-                <div class="card-date">Created ${formatDate(t.createdAt)}</div>
+                <div class="card-progress" title="${stats.decided}/${stats.total} matches played">
+                    <div class="card-progress-bar" style="width:${pct}%"></div>
+                </div>
+                ${champ && champ !== 'BYE'
+                    ? `<div class="card-champion">🏆 ${escapeHtml(champ)}</div>`
+                    : `<div class="card-date">Created ${formatDate(t.createdAt)}</div>`}
             `;
 
             card.addEventListener('click', () => openBracket(t.id));
@@ -224,6 +256,17 @@
         }
     });
 
+    let editingId = null;
+
+    function resetCreateForm() {
+        editingId = null;
+        createForm.reset();
+        participantCount.textContent = '0';
+        document.getElementById('createTitle').textContent = 'Create Tournament';
+        document.getElementById('createSubmitBtn').textContent = 'Generate Bracket';
+        bracketTypeSelect.dispatchEvent(new Event('change'));
+    }
+
     createForm.addEventListener('submit', (e) => {
         e.preventDefault();
 
@@ -235,7 +278,7 @@
         let participants = participantsInput.value
             .split('\n')
             .map(l => l.trim())
-            .filter(l => l.length > 0);
+            .filter(l => l.length > 0 && l.toUpperCase() !== 'BYE');
 
         if (participants.length < 2) {
             showToast('Please enter at least 2 participants', 'error');
@@ -251,6 +294,24 @@
             participants = shuffleArray(participants);
         }
 
+        if (editingId) {
+            const existing = Storage.getTournament(editingId);
+            if (existing) {
+                existing.name = name;
+                existing.type = type;
+                existing.thirdPlace = thirdPlace;
+                existing.participants = participants;
+                existing.bracket = BracketEngine.generate(participants, type, thirdPlace);
+                Storage.updateTournament(existing);
+                const id = existing.id;
+                resetCreateForm();
+                renderDashboard();
+                openBracket(id);
+                showToast('Tournament updated');
+                return;
+            }
+        }
+
         const tournament = {
             id: generateId(),
             name,
@@ -263,8 +324,7 @@
 
         Storage.addTournament(tournament);
         showToast('Tournament created successfully!');
-        createForm.reset();
-        participantCount.textContent = '0';
+        resetCreateForm();
         renderDashboard();
         openBracket(tournament.id);
     });
@@ -278,10 +338,7 @@
         if (!tournament) return;
 
         document.getElementById('bracketTitle').textContent = tournament.name;
-        const typeLabel = tournament.type === 'double' ? 'Double Elimination' : 'Single Elimination';
-        const matchCount = tournament.bracket.winners[0].length;
-        document.getElementById('bracketMeta').textContent =
-            `${typeLabel} • ${matchCount * 2} slots • ${tournament.bracket.rounds} rounds`;
+        updateBracketMeta(tournament);
 
         // Show/hide tabs for double elimination
         const tabs = document.getElementById('bracketTabs');
@@ -299,6 +356,15 @@
         }
 
         switchView('bracket');
+    }
+
+    function updateBracketMeta(tournament) {
+        const typeLabel = tournament.type === 'double' ? 'Double Elimination' : 'Single Elimination';
+        const stats = BracketEngine.getStats(tournament.bracket);
+        const champ = BracketEngine.getChampion(tournament.bracket);
+        let meta = `${typeLabel} • ${tournament.participants.length} players • ${stats.decided}/${stats.total} matches`;
+        if (champ && champ !== 'BYE') meta += ` • 🏆 ${champ}`;
+        document.getElementById('bracketMeta').textContent = meta;
     }
 
     function renderSingleBracket(tournament) {
@@ -342,61 +408,34 @@
     // ===== Match Interaction =====
     const matchModal = document.getElementById('matchModal');
     let currentMatch = null;
-    let currentBracketSection = null;
     let currentTournamentObj = null;
 
     function attachMatchListeners(tournament) {
         document.querySelectorAll('.bracket-match[data-match]').forEach(el => {
             el.addEventListener('click', () => {
-                const matchId = el.dataset.match;
-                const section = el.dataset.section || 'winners';
-                openMatchModal(tournament, matchId, section);
+                openMatchModal(tournament, el.dataset.match);
             });
         });
     }
 
-    function openMatchModal(tournament, matchId, section) {
+    function openMatchModal(tournament, matchId) {
         // Always fetch fresh from storage so we modify the correct object
         const freshTournament = Storage.getTournament(tournament.id);
         if (!freshTournament) return;
-        const bracket = freshTournament.bracket;
-        let match;
-
-        if (section === 'winners' || section === 'single') {
-            match = findMatch(bracket.winners, matchId);
-        } else if (section === 'losers') {
-            match = findMatch(bracket.losers, matchId);
-        } else if (section === 'finals') {
-            match = bracket.grandFinals && bracket.grandFinals.id === matchId
-                ? bracket.grandFinals : null;
-            if (!match && bracket.thirdPlace && bracket.thirdPlace.id === matchId) {
-                match = bracket.thirdPlace;
-            }
-        }
+        const match = BracketEngine.findMatchById(freshTournament.bracket, matchId);
 
         if (!match) return;
-        if (!match.player1 || !match.player2) {
+        if (!match.player1 || !match.player2 || match.player1 === 'BYE' || match.player2 === 'BYE') {
             showToast('Both players must be determined first', 'error');
             return;
         }
 
         currentMatch = match;
-        currentBracketSection = section;
         currentTournamentObj = freshTournament;
 
         document.getElementById('modalPlayer1').textContent = match.player1;
         document.getElementById('modalPlayer2').textContent = match.player2;
         matchModal.classList.add('visible');
-    }
-
-    function findMatch(rounds, matchId) {
-        if (!rounds) return null;
-        for (const round of rounds) {
-            for (const match of round) {
-                if (match.id === matchId) return match;
-            }
-        }
-        return null;
     }
 
     document.getElementById('pickPlayer1').addEventListener('click', () => {
@@ -408,9 +447,11 @@
     });
 
     document.getElementById('closeModal').addEventListener('click', closeModal);
-    document.getElementById('deleteMatchBtn').addEventListener('click', deleteMatch);
     matchModal.addEventListener('click', (e) => {
         if (e.target === matchModal) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && matchModal.classList.contains('visible')) closeModal();
     });
 
     function closeModal() {
@@ -423,37 +464,24 @@
         if (!currentMatch || !currentTournamentId || !currentTournamentObj) return;
 
         const tournament = currentTournamentObj;
-        // Find the match inside the fresh tournament object
-        const match = BracketEngine.findMatchById(tournament.bracket, currentMatch.id);
-        if (!match) return;
-
-        const loser = match.player1 === winner ? match.player2 : match.player1;
-        match.winner = winner;
-        match.loser = loser;
-
-        // Advance winner to next match (also clears downstream if re-selecting)
-        BracketEngine.advanceWinner(tournament.bracket, match, winner, loser, currentBracketSection);
-
-        // Handle third place for single elimination
-        if (tournament.bracket.type === 'single' && tournament.bracket.thirdPlace && tournament.bracket.winners.length >= 2) {
-            const semiRound = tournament.bracket.winners[tournament.bracket.winners.length - 2];
-            const semiLosers = semiRound.filter(m => m.loser).map(m => m.loser);
-            if (semiLosers.length >= 2) {
-                tournament.bracket.thirdPlace.player1 = semiLosers[0];
-                tournament.bracket.thirdPlace.player2 = semiLosers[1];
-            }
+        if (!BracketEngine.setResult(tournament.bracket, currentMatch.id, winner)) {
+            closeModal();
+            return;
         }
 
         Storage.updateTournament(tournament);
         closeModal();
+        rerenderBracket(tournament);
+    }
 
-        // Re-render
+    function rerenderBracket(tournament) {
         if (tournament.type === 'double') {
             const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
             renderBracketTab(activeTab);
         } else {
             renderSingleBracket(tournament);
         }
+        updateBracketMeta(tournament);
     }
 
     // ===== Inline Name Editing =====
@@ -466,69 +494,6 @@
                 startInlineEdit(btn.closest('.match-slot'), matchId, slot);
             });
         });
-
-        // Card delete buttons
-        document.querySelectorAll('.card-delete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const matchId = btn.dataset.matchId;
-                deleteMatchById(matchId);
-            });
-        });
-    }
-
-    function deleteMatchById(matchId) {
-        if (!currentTournamentId) return;
-        const tournament = Storage.getTournament(currentTournamentId);
-        if (!tournament) return;
-
-        const firstRound = tournament.bracket.winners[0];
-        if (firstRound.length <= 1) {
-            showToast('Cannot delete the last match', 'error');
-            return;
-        }
-
-        const idx = firstRound.findIndex(m => m.id === matchId);
-        if (idx === -1) {
-            showToast('Only first-round matches can be deleted', 'error');
-            return;
-        }
-
-        if (!confirm('Delete this match? This will rebuild the bracket.')) return;
-
-        firstRound.splice(idx, 1);
-        rebuildBracketLinks(tournament.bracket);
-        Storage.updateTournament(tournament);
-        openBracket(tournament.id);
-        showToast('Match deleted');
-    }
-
-    function deleteMatch() {
-        if (!currentMatch || !currentTournamentId) return;
-        const tournament = Storage.getTournament(currentTournamentId);
-        if (!tournament) return;
-
-        const firstRound = tournament.bracket.winners[0];
-        if (firstRound.length <= 1) {
-            showToast('Cannot delete the last match', 'error');
-            return;
-        }
-
-        const idx = firstRound.findIndex(m => m.id === currentMatch.id);
-        if (idx === -1) {
-            showToast('Only first-round matches can be deleted', 'error');
-            return;
-        }
-
-        if (!confirm('Delete this match? This will rebuild the bracket.')) return;
-
-        firstRound.splice(idx, 1);
-        rebuildBracketLinks(tournament.bracket);
-        Storage.updateTournament(tournament);
-        matchModal.classList.remove('visible');
-        currentMatch = null;
-        openBracket(tournament.id);
-        showToast('Match deleted');
     }
 
     function startInlineEdit(slotEl, matchId, slot) {
@@ -580,14 +545,7 @@
 
         BracketEngine.updatePlayerName(tournament.bracket, matchId, slot, newName || null);
         Storage.updateTournament(tournament);
-
-        // Re-render
-        if (tournament.type === 'double') {
-            const activeTab = document.querySelector('.tab-btn.active').dataset.tab;
-            renderBracketTab(activeTab);
-        } else {
-            renderSingleBracket(tournament);
-        }
+        rerenderBracket(tournament);
         showToast('Player name updated');
     }
 
@@ -636,122 +594,39 @@
         });
     });
 
-    // Add match (add two new participant slots)
-    document.getElementById('addMatchBtn').addEventListener('click', () => {
+    // Edit participants (reopens the form prefilled and rebuilds the bracket)
+    document.getElementById('editParticipantsBtn').addEventListener('click', () => {
         if (!currentTournamentId) return;
         const tournament = Storage.getTournament(currentTournamentId);
         if (!tournament) return;
 
-        const bracket = tournament.bracket;
-        const firstRound = bracket.winners[0];
-
-        // Create a new match in the first round
-        const maxId = firstRound.reduce((max, m) => {
-            const num = parseInt(m.id.replace(/\D/g, '')) || 0;
-            return Math.max(max, num);
-        }, 0);
-
-        const newMatch = {
-            id: `w-r0-m${maxId + 1}`,
-            player1: null,
-            player2: null,
-            seed1: null,
-            seed2: null,
-            winner: null,
-            loser: null,
-            nextMatchId: null,
-            nextSlot: null
-        };
-
-        firstRound.push(newMatch);
-        tournament.participants.push('', ''); // Placeholder
-
-        // Regenerate linkages for all rounds beyond the first
-        rebuildBracketLinks(bracket);
-
-        Storage.updateTournament(tournament);
-        openBracket(tournament.id);
-        showToast('New match added — edit player names to fill it');
+        editingId = tournament.id;
+        document.getElementById('tournamentName').value = tournament.name;
+        bracketTypeSelect.value = tournament.type;
+        thirdPlaceSelect.value = tournament.thirdPlace ? 'yes' : 'no';
+        participantsInput.value = tournament.participants.join('\n');
+        participantCount.textContent = tournament.participants.length;
+        bracketTypeSelect.dispatchEvent(new Event('change'));
+        document.getElementById('createTitle').textContent = 'Edit Tournament';
+        document.getElementById('createSubmitBtn').textContent = 'Save & Rebuild';
+        switchView('create');
     });
-
-    /**
-     * Rebuild bracket links after adding/removing first round matches.
-     * Regenerates rounds 2+ to match the new first round size.
-     */
-    function rebuildBracketLinks(bracket) {
-        const firstRound = bracket.winners[0];
-        bracket.winners = [firstRound];
-
-        let matchCounter = firstRound.length * 10; // Avoid ID collisions
-        let prevRound = firstRound;
-
-        // Clear old nextMatchId links
-        firstRound.forEach(m => { m.nextMatchId = null; m.nextSlot = null; });
-
-        while (prevRound.length > 1) {
-            const round = [];
-            for (let i = 0; i < prevRound.length; i += 2) {
-                const match = {
-                    id: `w-r${bracket.winners.length}-m${matchCounter++}`,
-                    player1: null,
-                    player2: null,
-                    seed1: null,
-                    seed2: null,
-                    winner: null,
-                    loser: null,
-                    nextMatchId: null,
-                    nextSlot: null
-                };
-
-                prevRound[i].nextMatchId = match.id;
-                prevRound[i].nextSlot = 'player1';
-
-                if (i + 1 < prevRound.length) {
-                    prevRound[i + 1].nextMatchId = match.id;
-                    prevRound[i + 1].nextSlot = 'player2';
-                } else {
-                    match.singleFeeder = true;
-                }
-
-                // Carry forward winners from first round if they exist
-                if (prevRound[i].winner) {
-                    match.player1 = prevRound[i].winner;
-                }
-                if (i + 1 < prevRound.length && prevRound[i + 1] && prevRound[i + 1].winner) {
-                    match.player2 = prevRound[i + 1].winner;
-                }
-
-                round.push(match);
-            }
-            bracket.winners.push(round);
-            prevRound = round;
-        }
-
-        bracket.rounds = bracket.winners.length;
-    }
 
     document.getElementById('toggleThirdPlaceBtn').addEventListener('click', () => {
         if (!currentTournamentId) return;
         const tournament = Storage.getTournament(currentTournamentId);
         if (!tournament || tournament.type !== 'single') return;
 
-        tournament.thirdPlace = !tournament.thirdPlace;
-
-        if (tournament.thirdPlace) {
-            // Add 3rd place match
-            tournament.bracket.thirdPlace = {
-                id: 'third-place',
-                player1: null,
-                player2: null,
-                seed1: null,
-                seed2: null,
-                winner: null,
-                loser: null
-            };
-        } else {
-            // Remove 3rd place match
-            delete tournament.bracket.thirdPlace;
+        const stats = BracketEngine.getStats(tournament.bracket);
+        if (stats.decided > 0 &&
+            !confirm('Changing the third-place setting rebuilds the bracket and clears results. Continue?')) {
+            return;
         }
+
+        tournament.thirdPlace = !tournament.thirdPlace;
+        tournament.bracket = BracketEngine.generate(
+            tournament.participants, tournament.type, tournament.thirdPlace
+        );
 
         Storage.updateTournament(tournament);
         openBracket(tournament.id);
@@ -832,9 +707,11 @@
     }
 
     // ===== Navigation Buttons =====
-    document.getElementById('newTournamentBtn').addEventListener('click', () => switchView('create'));
-    document.getElementById('emptyCreateBtn').addEventListener('click', () => switchView('create'));
+    document.getElementById('newTournamentBtn').addEventListener('click', () => { resetCreateForm(); switchView('create'); });
+    document.getElementById('emptyCreateBtn').addEventListener('click', () => { resetCreateForm(); switchView('create'); });
+    document.querySelector('.nav-btn[data-view="create"]').addEventListener('click', resetCreateForm);
     document.getElementById('cancelCreate').addEventListener('click', () => {
+        resetCreateForm();
         switchView('dashboard');
         renderDashboard();
     });
